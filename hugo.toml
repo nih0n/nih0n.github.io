@@ -1,0 +1,13 @@
+baseURL = 'https://nih0n.github.io/'
+languageCode = 'en-us'
+title = "nih0n's Blog"
+theme = "re-terminal"
+
+[params]
+themeColor = 'red'
+
+[languages]
+  [languages.en.params]
+    [languages.en.params.logo]
+      logoText = "nih0n"
+      logoHomeLink = "/"

@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><script src="/livereload.js?mindelay=10&amp;v=2&amp;port=1313&amp;path=livereload" data-no-instant defer></script>
+  
+    <title>ASP.NET Sessions Internals :: nih0n&#39;s Blog</title>
+  
+  <meta http-equiv="content-type" content="text/html; charset=utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="Just me learning about sessions" />
+<meta name="keywords" content="" />
+
+  <meta name="robots" content="noodp" />
+
+<link rel="canonical" href="http://localhost:1313/posts/asp-net-sessions-internals/" />
+
+
+  
+
+
+
+
+
+
+  
+  
+  
+  
+  
+  <link rel="stylesheet" href="http://localhost:1313/styles.css">
+
+
+
+
+
+
+
+  <link rel="shortcut icon" href="http://localhost:1313/img/theme-colors/red.png">
+  <link rel="apple-touch-icon" href="http://localhost:1313/img/theme-colors/red.png">
+
+
+
+<meta name="twitter:card" content="summary" />
+
+
+
+<meta property="og:locale" content="en" />
+<meta property="og:type" content="article" />
+<meta property="og:title" content="ASP.NET Sessions Internals">
+<meta property="og:description" content="Just me learning about sessions" />
+<meta property="og:url" content="http://localhost:1313/posts/asp-net-sessions-internals/" />
+<meta property="og:site_name" content="nih0n&#39;s Blog" />
+
+  
+  
+  <meta property="og:image" content="http://localhost:1313/">
+
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="627">
+
+
+  <meta property="article:published_time" content="2024-08-29 19:45:17 -0300 -03" />
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+
+</head>
+<body class="red">
+
+
+
+
+<div class="container center headings--one-size">
+
+  <header class="header">
+  <div class="header__inner">
+    <div class="header__logo">
+      <a href="/">
+  <div class="logo">
+    nih0n
+  </div>
+</a>
+
+    </div>
+    
+    
+  </div>
+  
+</header>
+
+
+  <div class="content">
+    
+<article class="post">
+  <h1 class="post-title">
+    <a href="http://localhost:1313/posts/asp-net-sessions-internals/">ASP.NET Sessions Internals</a>
+  </h1>
+  <div class="post-meta"><time class="post-date">2024-08-29</time><span class="post-author">Fernando Omori</span>
+    
+</div>
+
+  
+  
+
+
+
+  
+
+  <div class="post-content"><div>
+        <p>When I was studying how sessions work I wondered: &ldquo;What is a session id ? A string ? A random number ? What&rsquo;s it&rsquo;s format ? Where is it stored ?&rdquo;.
+So I procceed to read the ASP.NET source code and I&rsquo;ll tell you what I learned about sessions.</p>
+<p>Let&rsquo;s begin with this simple application</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-csharp" data-lang="csharp"><span style="display:flex;"><span><span style="color:#66d9ef">using</span> Microsoft.AspNetCore.Mvc;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">var</span> builder = WebApplication.CreateBuilder(args);
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>builder.Services.AddSession();
+</span></span><span style="display:flex;"><span>builder.Services.AddDistributedMemoryCache();
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">var</span> app = builder.Build();
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>app.UseSession();
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>app.MapGet(<span style="color:#e6db74">&#34;/&#34;</span>, (HttpContext context) =&gt; TypedResults.Ok(context.Session.GetString(<span style="color:#e6db74">&#34;Name&#34;</span>)));
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>app.MapPost(<span style="color:#e6db74">&#34;/&#34;</span>, (HttpContext context, [FromBody] <span style="color:#66d9ef">string</span> <span style="color:#66d9ef">value</span>) =&gt; context.Session.SetString(<span style="color:#e6db74">&#34;Name&#34;</span>, <span style="color:#66d9ef">value</span>));
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>app.Run();
+</span></span></code></pre></div><h2 id="services">Services<a href="#services" class="hanchor" ariaLabel="Anchor">&#8983;</a> </h2>
+<p>We use <code>.AddSession()</code> to configure services needed to enable sessions</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-csharp" data-lang="csharp"><span style="display:flex;"><span>services.TryAddTransient&lt;ISessionStore, DistributedSessionStore&gt;();
+</span></span><span style="display:flex;"><span>services.AddDataProtection(); <span style="color:#75715e">// This one adds IDataProtectionProvider to the DI container</span>
+</span></span></code></pre></div><ul>
+<li>The <code>ISessionStore</code> to persist the session</li>
+<li>The <code>IDataProtectionProvider</code> to encrypt the cookie</li>
+</ul>
+<p>We use <code>.AddDistributedMemoryCache()</code> to configure services needed to store the session data</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-csharp" data-lang="csharp"><span style="display:flex;"><span>services.TryAdd(ServiceDescriptor.Singleton&lt;IDistributedCache, MemoryDistributedCache&gt;());
+</span></span></code></pre></div><p>then we call <code>.UseSession()</code> to add <code>SessionMiddleware</code> to the middleware pipeline, otherwise the session cookie won&rsquo;t be handled.</p>
+<blockquote>
+<p>Actually the session persistence happens inside <code>DistributedSession</code>, the <code>DistributedSessionStore</code> just creates a new <code>DistributedSession</code> passing the <code>IDistributedCache</code>.</p>
+</blockquote>
+<h3 id="storage">Storage<a href="#storage" class="hanchor" ariaLabel="Anchor">&#8983;</a> </h3>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-csharp" data-lang="csharp"><span style="display:flex;"><span><span style="color:#66d9ef">public</span> <span style="color:#66d9ef">class</span> <span style="color:#a6e22e">DistributedSessionStore</span> : ISessionStore
+</span></span><span style="display:flex;"><span>{
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">private</span> <span style="color:#66d9ef">readonly</span> IDistributedCache _cache;
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">private</span> <span style="color:#66d9ef">readonly</span> ILoggerFactory _loggerFactory;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>    <span style="color:#75715e">// ...</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">public</span> ISession Create(<span style="color:#66d9ef">string</span> sessionKey, TimeSpan idleTimeout, TimeSpan ioTimeout, Func&lt;<span style="color:#66d9ef">bool</span>&gt; tryEstablishSession, <span style="color:#66d9ef">bool</span> isNewSessionKey)
+</span></span><span style="display:flex;"><span>    {
+</span></span><span style="display:flex;"><span>        <span style="color:#66d9ef">if</span> (<span style="color:#66d9ef">string</span>.IsNullOrEmpty(sessionKey))
+</span></span><span style="display:flex;"><span>        {
+</span></span><span style="display:flex;"><span>            <span style="color:#66d9ef">throw</span> <span style="color:#66d9ef">new</span> ArgumentException(Resources.ArgumentCannotBeNullOrEmpty, nameof(sessionKey));
+</span></span><span style="display:flex;"><span>        }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        ArgumentNullException.ThrowIfNull(tryEstablishSession);
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#66d9ef">return</span> <span style="color:#66d9ef">new</span> DistributedSession(_cache, sessionKey, idleTimeout, ioTimeout, tryEstablishSession, _loggerFactory, isNewSessionKey);
+</span></span><span style="display:flex;"><span>    }
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>The <code>ISessionStore</code> is responsible for creating a new session object. <code>DistributedSessionStore</code> the default implementation of <code>ISessionStore</code> creates a new <code>DistributedSession</code> (our actual session, a concrete implementation of <code>ISession</code>) that is backed by a <code>DefaultDistributedSessionStore</code> a key pair structure used to store session data <code>Dictionary&lt;EncodedKey, byte[]&gt;</code>.</p>
+<p>So when we do</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-csharp" data-lang="csharp"><span style="display:flex;"><span>context.Session.GetString(<span style="color:#e6db74">&#34;Name&#34;</span>);
+</span></span><span style="display:flex;"><span>context.Session.SetString(<span style="color:#e6db74">&#34;Name&#34;</span>, <span style="color:#66d9ef">value</span>);
+</span></span></code></pre></div><p>That is being handled by <code>DistributedSession</code> and stored in <code>DefaultDistributedSessionStore</code>.</p>
+<p>Usually we use the in-memory implementation <code>.AddDistributedMemoryCache()</code> but we can use any implementation of <code>IDistributedCache</code>, for example <code>RedisCache</code> (from <code>Microsoft.Extensions.Caching.StackExchangeRedis</code>) that saves data to a Redis database.</p>
+<blockquote>
+<p>A <code>IDistributedCache</code> implementation <strong>must</strong> be added, else an expection will be throw.</p>
+</blockquote>
+<blockquote>
+<p>When data is persisted it gets serialized using what Microsoft calls <code>SerializeNumAs4Bytes</code>.</p>
+</blockquote>
+<h3 id="security">Security<a href="#security" class="hanchor" ariaLabel="Anchor">&#8983;</a> </h3>
+<p><code>IDataProtector</code> encrypts the cookie using AES-CBC and HMAC-SHA256 to prevent tampering.</p>
+<h3 id="middleware">Middleware<a href="#middleware" class="hanchor" ariaLabel="Anchor">&#8983;</a> </h3>
+<p>Let&rsquo;s take a look in the <code>SessionMiddleware</code>, specifically at <code>Invoke</code> method where the magic happens</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-csharp" data-lang="csharp"><span style="display:flex;"><span><span style="color:#66d9ef">public</span> <span style="color:#66d9ef">async</span> Task Invoke(HttpContext context)
+</span></span><span style="display:flex;"><span>{
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">var</span> isNewSessionKey = <span style="color:#66d9ef">false</span>;
+</span></span><span style="display:flex;"><span>    Func&lt;<span style="color:#66d9ef">bool</span>&gt; tryEstablishSession = ReturnTrue;
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">var</span> cookieValue = context.Request.Cookies[_options.Cookie.Name!];
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">var</span> sessionKey = CookieProtection.Unprotect(_dataProtector, cookieValue, _logger);
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">if</span> (<span style="color:#66d9ef">string</span>.IsNullOrWhiteSpace(sessionKey) || sessionKey.Length != SessionKeyLength)
+</span></span><span style="display:flex;"><span>    {
+</span></span><span style="display:flex;"><span>        sessionKey = GetSessionKey();
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#66d9ef">static</span> <span style="color:#66d9ef">string</span> GetSessionKey()
+</span></span><span style="display:flex;"><span>        {
+</span></span><span style="display:flex;"><span>            Span&lt;<span style="color:#66d9ef">byte</span>&gt; guidBytes = <span style="color:#66d9ef">stackalloc</span> <span style="color:#66d9ef">byte</span>[<span style="color:#ae81ff">16</span>];
+</span></span><span style="display:flex;"><span>            RandomNumberGenerator.Fill(guidBytes);
+</span></span><span style="display:flex;"><span>            <span style="color:#66d9ef">return</span> <span style="color:#66d9ef">new</span> Guid(guidBytes).ToString();
+</span></span><span style="display:flex;"><span>        }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        cookieValue = CookieProtection.Protect(_dataProtector, sessionKey);
+</span></span><span style="display:flex;"><span>        <span style="color:#66d9ef">var</span> establisher = <span style="color:#66d9ef">new</span> SessionEstablisher(context, cookieValue, _options);
+</span></span><span style="display:flex;"><span>        tryEstablishSession = establisher.TryEstablishSession;
+</span></span><span style="display:flex;"><span>        isNewSessionKey = <span style="color:#66d9ef">true</span>;
+</span></span><span style="display:flex;"><span>    }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">var</span> feature = <span style="color:#66d9ef">new</span> SessionFeature();
+</span></span><span style="display:flex;"><span>    feature.Session = _sessionStore.Create(sessionKey, _options.IdleTimeout, _options.IOTimeout, tryEstablishSession, isNewSessionKey);
+</span></span><span style="display:flex;"><span>    context.Features.Set&lt;ISessionFeature&gt;(feature);
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">try</span>
+</span></span><span style="display:flex;"><span>    {
+</span></span><span style="display:flex;"><span>        <span style="color:#66d9ef">await</span> _next(context);
+</span></span><span style="display:flex;"><span>    }
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">finally</span>
+</span></span><span style="display:flex;"><span>    {
+</span></span><span style="display:flex;"><span>        context.Features.Set&lt;ISessionFeature?&gt;(<span style="color:#66d9ef">null</span>);
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#66d9ef">if</span> (feature.Session != <span style="color:#66d9ef">null</span>)
+</span></span><span style="display:flex;"><span>        {
+</span></span><span style="display:flex;"><span>            <span style="color:#66d9ef">try</span>
+</span></span><span style="display:flex;"><span>            {
+</span></span><span style="display:flex;"><span>                <span style="color:#66d9ef">await</span> feature.Session.CommitAsync();
+</span></span><span style="display:flex;"><span>            }
+</span></span><span style="display:flex;"><span>            <span style="color:#66d9ef">catch</span> (OperationCanceledException)
+</span></span><span style="display:flex;"><span>            {
+</span></span><span style="display:flex;"><span>                _logger.SessionCommitCanceled();
+</span></span><span style="display:flex;"><span>            }
+</span></span><span style="display:flex;"><span>            <span style="color:#66d9ef">catch</span> (Exception ex)
+</span></span><span style="display:flex;"><span>            {
+</span></span><span style="display:flex;"><span>                _logger.ErrorClosingTheSession(ex);
+</span></span><span style="display:flex;"><span>            }
+</span></span><span style="display:flex;"><span>        }
+</span></span><span style="display:flex;"><span>    }
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>First the middleware will initialize some variables</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-csharp" data-lang="csharp"><span style="display:flex;"><span><span style="color:#66d9ef">var</span> isNewSessionKey = <span style="color:#66d9ef">false</span>;
+</span></span><span style="display:flex;"><span>Func&lt;<span style="color:#66d9ef">bool</span>&gt; tryEstablishSession = ReturnTrue;
+</span></span></code></pre></div><ul>
+<li>The <code>isNewSessionKey</code> is just a flag to say if we are establishing a new session and later will be used to check if we are trying to access a expired session.</li>
+<li>The <code>tryEstablishSession</code> is a callback to verify that modifying the session is currently valid.</li>
+</ul>
+<p>Then the middleware will try to get a cookie with the name we&rsquo;ve set (the default cookie name is <code>.AspNetCore.Session</code>)</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-csharp" data-lang="csharp"><span style="display:flex;"><span><span style="color:#66d9ef">var</span> cookieValue = context.Request.Cookies[_options.Cookie.Name!]
+</span></span></code></pre></div><p>At this point we still don&rsquo;t know if the cookie is set, we need to decrypt the cookie to check if it has any value</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-csharp" data-lang="csharp"><span style="display:flex;"><span><span style="color:#66d9ef">var</span> sessionKey = CookieProtection.Unprotect(_dataProtector, cookieValue, _logger)
+</span></span></code></pre></div><p>If the cookie is not set the <code>sessionKey</code> will be a <code>string.Empty</code> and a new session id will be generated</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-csharp" data-lang="csharp"><span style="display:flex;"><span>sessionKey = GetSessionKey();
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">static</span> <span style="color:#66d9ef">string</span> GetSessionKey()
+</span></span><span style="display:flex;"><span>{
+</span></span><span style="display:flex;"><span>    Span&lt;<span style="color:#66d9ef">byte</span>&gt; guidBytes = <span style="color:#66d9ef">stackalloc</span> <span style="color:#66d9ef">byte</span>[<span style="color:#ae81ff">16</span>];
+</span></span><span style="display:flex;"><span>    RandomNumberGenerator.Fill(guidBytes);
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">return</span> <span style="color:#66d9ef">new</span> Guid(guidBytes).ToString();
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>cookieValue = CookieProtection.Protect(_dataProtector, sessionKey);
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">var</span> establisher = <span style="color:#66d9ef">new</span> SessionEstablisher(context, cookieValue, _options);
+</span></span><span style="display:flex;"><span>tryEstablishSession = establisher.TryEstablishSession;
+</span></span><span style="display:flex;"><span>isNewSessionKey = <span style="color:#66d9ef">true</span>;
+</span></span></code></pre></div><p>There it is, the session id is a <code>Guid</code>.</p>
+<p>Now we encrypt the session id and pass it to <code>SessionEstablisher</code>, it will set a callback to set the cookie in the HTTP response.</p>
+<p>Now our session is available for the next middlewares</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-csharp" data-lang="csharp"><span style="display:flex;"><span><span style="color:#66d9ef">var</span> feature = <span style="color:#66d9ef">new</span> SessionFeature();
+</span></span><span style="display:flex;"><span>feature.Session = _sessionStore.Create(sessionKey, _options.IdleTimeout, _options.IOTimeout, tryEstablishSession, isNewSessionKey);
+</span></span><span style="display:flex;"><span>context.Features.Set&lt;ISessionFeature&gt;(feature);
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">try</span>
+</span></span><span style="display:flex;"><span>{
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">await</span> _next(context);
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>The <code>HttpContext</code> is propagated to the next middlewares til it hit our controller where we manage the session using <code>context.Session</code>, when our logic is done it&rsquo;s time to unwind the middleware stack til we hit</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-csharp" data-lang="csharp"><span style="display:flex;"><span><span style="color:#66d9ef">finally</span>
+</span></span><span style="display:flex;"><span>{
+</span></span><span style="display:flex;"><span>    context.Features.Set&lt;ISessionFeature?&gt;(<span style="color:#66d9ef">null</span>);
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">if</span> (feature.Session != <span style="color:#66d9ef">null</span>)
+</span></span><span style="display:flex;"><span>    {
+</span></span><span style="display:flex;"><span>        <span style="color:#66d9ef">try</span>
+</span></span><span style="display:flex;"><span>        {
+</span></span><span style="display:flex;"><span>            <span style="color:#66d9ef">await</span> feature.Session.CommitAsync();
+</span></span><span style="display:flex;"><span>        }
+</span></span><span style="display:flex;"><span>        <span style="color:#66d9ef">catch</span> (OperationCanceledException)
+</span></span><span style="display:flex;"><span>        {
+</span></span><span style="display:flex;"><span>            _logger.SessionCommitCanceled();
+</span></span><span style="display:flex;"><span>        }
+</span></span><span style="display:flex;"><span>        <span style="color:#66d9ef">catch</span> (Exception ex)
+</span></span><span style="display:flex;"><span>        {
+</span></span><span style="display:flex;"><span>            _logger.ErrorClosingTheSession(ex);
+</span></span><span style="display:flex;"><span>        }
+</span></span><span style="display:flex;"><span>    }
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>And with the statement <code>await feature.Session.CommitAsync();</code> we persist our session to our cache storage.</p>
+
+      </div></div>
+
+  
+
+  
+    
+
+  
+</article>
+
+  </div>
+
+  
+    <footer class="footer">
+  <div class="footer__inner">
+    
+      <div class="copyright">
+        <span>© 2024 Powered by <a href="https://gohugo.io">Hugo</a></span>
+    
+      <span>:: <a href="https://github.com/mirus-ua/hugo-theme-re-terminal" target="_blank">Theme</a> made by <a href="https://github.com/mirus-ua" target="_blank">Mirus</a></span>
+      </div>
+  </div>
+</footer>
+
+
+
+
+
+
+<script type="text/javascript" src="/bundle.min.js"></script>
+
+
+
+
+
+
+
+
+  
+</div>
+
+</body>
+</html>
