@@ -169,8 +169,8 @@ var isNewSessionKey = false;
 Func<bool> tryEstablishSession = ReturnTrue;
 ```
 
-- The `isNewSessionKey` is just a flag to say if we are establishing a new session and later will be used to check if we are trying to access a expired session.
-- The `tryEstablishSession` is a callback to verify that modifying the session is currently valid.
+- The `isNewSessionKey` is just a flag to say if we are establishing a new session and later will be used to check if we are trying to access an expired session.
+- The `tryEstablishSession` is a callback used to verify whether modifying the session is currently valid.
 
 Then the middleware will try to get a cookie with the name we've set (the default cookie name is `.AspNetCore.Session`)
 
