@@ -12,7 +12,7 @@ hideComments = false
 color = "" #color from the theme settings
 +++
 
-When I was studying how sessions work I wondered: "What is a session id ? A string ? A random number ? What's it's format ? Where is it stored ?".
+When I was studying how sessions work I wondered: "What is a session id ? A string ? A random number ? What's its format ? Where is it stored ?".
 So I procceed to read the ASP.NET source code and I'll tell you what I learned about sessions.
 
 Let's begin with this simple application
@@ -45,8 +45,8 @@ services.TryAddTransient<ISessionStore, DistributedSessionStore>();
 services.AddDataProtection(); // This one adds IDataProtectionProvider to the DI container
 ```
 
-- The `ISessionStore` to persist the session
-- The `IDataProtectionProvider` to encrypt the cookie
+- The `ISessionStore` to persist the session.
+- The `IDataProtectionProvider` to encrypt the cookie.
 
 We use `.AddDistributedMemoryCache()` to configure services needed to store the session data
 
@@ -54,7 +54,7 @@ We use `.AddDistributedMemoryCache()` to configure services needed to store the 
 services.TryAdd(ServiceDescriptor.Singleton<IDistributedCache, MemoryDistributedCache>());
 ```
 
-then we call `.UseSession()` to add `SessionMiddleware` to the middleware pipeline, otherwise the session cookie won't be handled.
+Then we call `.UseSession()` to add `SessionMiddleware` to the middleware pipeline, otherwise the session cookie won't be handled.
 
 > Actually the session persistence happens inside `DistributedSession`, the `DistributedSessionStore` just creates a new `DistributedSession` passing the `IDistributedCache`.
 
