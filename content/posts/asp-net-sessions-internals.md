@@ -12,7 +12,7 @@ hideComments = false
 color = "" #color from the theme settings
 +++
 
-When I was studying how sessions work I wondered: "What is a session id ? A string ? A random number ? What's it's format ? Where is it stored ?".
+When I was studying how sessions work I wondered: "What is a session id ? A string ? A random number ? What's its format ? Where is it stored ?".
 So I procceed to read the ASP.NET source code and I'll tell you what I learned about sessions.
 
 Let's begin with this simple application
@@ -45,8 +45,8 @@ services.TryAddTransient<ISessionStore, DistributedSessionStore>();
 services.AddDataProtection(); // This one adds IDataProtectionProvider to the DI container
 ```
 
-- The `ISessionStore` to persist the session
-- The `IDataProtectionProvider` to encrypt the cookie
+- The `ISessionStore` to persist the session.
+- The `IDataProtectionProvider` to encrypt the cookie.
 
 We use `.AddDistributedMemoryCache()` to configure services needed to store the session data
 
